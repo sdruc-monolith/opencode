@@ -33,13 +33,6 @@ export type EventProjectUpdated = {
   properties: Project
 }
 
-export type EventServerInstanceDisposed = {
-  type: "server.instance.disposed"
-  properties: {
-    directory: string
-  }
-}
-
 export type EventServerConnected = {
   type: "server.connected"
   properties: {
@@ -51,6 +44,13 @@ export type EventGlobalDisposed = {
   type: "global.disposed"
   properties: {
     [key: string]: unknown
+  }
+}
+
+export type EventServerInstanceDisposed = {
+  type: "server.instance.disposed"
+  properties: {
+    directory: string
   }
 }
 
@@ -1110,9 +1110,9 @@ export type GlobalEvent = {
   workspace?: string
   payload:
     | EventProjectUpdated
-    | EventServerInstanceDisposed
     | EventServerConnected
     | EventGlobalDisposed
+    | EventServerInstanceDisposed
     | EventFileEdited
     | EventFileWatcherUpdated
     | EventLspClientDiagnostics
@@ -1683,6 +1683,26 @@ export type Config = {
      */
     openTelemetry?: boolean
     /**
+     * Override OTLP exporter endpoint (equivalent to OTEL_EXPORTER_OTLP_ENDPOINT)
+     */
+    openTelemetryEndpoint?: string
+    /**
+     * Override OTLP exporter headers (equivalent to OTEL_EXPORTER_OTLP_HEADERS)
+     */
+    openTelemetryHeaders?: string
+    /**
+     * Weights & Biases trace base URL (defaults to https://trace.wandb.ai)
+     */
+    wandbBaseUrl?: string
+    /**
+     * Weights & Biases team or user name for trace routing
+     */
+    wandbEntity?: string
+    /**
+     * Weights & Biases project name for trace routing
+     */
+    wandbProject?: string
+    /**
      * Tools that should only be available to primary agents.
      */
     primary_tools?: Array<string>
@@ -2053,9 +2073,9 @@ export type File = {
 
 export type Event =
   | EventProjectUpdated
-  | EventServerInstanceDisposed
   | EventServerConnected
   | EventGlobalDisposed
+  | EventServerInstanceDisposed
   | EventFileEdited
   | EventFileWatcherUpdated
   | EventLspClientDiagnostics

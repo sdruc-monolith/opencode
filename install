@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 APP=opencode
+COMMAND=moncode
+GITHUB_REPO=${GITHUB_REPO:-sdruc-monolith/opencode}
 
 MUTED='\033[0;2m'
 RED='\033[0;31m'
@@ -16,19 +18,23 @@ Usage: install.sh [options]
 Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 1.0.180)
-    -b, --binary <path>     Install from a local binary instead of downloading
+    -p, --binary <path>     Install from a local binary instead of downloading
+    -b, --build-local       Build local binary from this repo and install it
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
 
 Examples:
     curl -fsSL https://opencode.ai/install | bash
     curl -fsSL https://opencode.ai/install | bash -s -- --version 1.0.180
-    ./install --binary /path/to/opencode
+    ./install -p /path/to/opencode
+    ./install -b
 EOF
 }
 
 requested_version=${VERSION:-}
 no_modify_path=false
 binary_path=""
+build_local=false
+build_local_version=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -45,7 +51,7 @@ while [[ $# -gt 0 ]]; do
                 exit 1
             fi
             ;;
-        -b|--binary)
+        -p|--binary)
             if [[ -n "${2:-}" ]]; then
                 binary_path="$2"
                 shift 2
@@ -53,6 +59,10 @@ while [[ $# -gt 0 ]]; do
                 echo -e "${RED}Error: --binary requires a path argument${NC}"
                 exit 1
             fi
+            ;;
+        -b|--build-local)
+            build_local=true
+            shift
             ;;
         --no-modify-path)
             no_modify_path=true
@@ -65,8 +75,43 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-INSTALL_DIR=$HOME/.opencode/bin
+INSTALL_DIR=${MONCODE_INSTALL_DIR:-${OPENCODE_INSTALL_DIR:-$HOME/.moncode/bin}}
 mkdir -p "$INSTALL_DIR"
+
+if [ "$build_local" = "true" ] && [ -n "$binary_path" ]; then
+    echo -e "${RED}Error: --build-local cannot be used together with --binary${NC}"
+    exit 1
+fi
+
+if [ "$build_local" = "true" ]; then
+    script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+    build_script="$script_dir/packages/opencode/script/build.ts"
+    if [ ! -f "$build_script" ]; then
+        echo -e "${RED}Error: --build-local requires running from this repository checkout${NC}"
+        exit 1
+    fi
+
+    bun_cmd=""
+    if bun_path=$(type -P bun 2>/dev/null) && [ -n "$bun_path" ]; then
+        bun_cmd="$bun_path"
+    elif [ -x "$HOME/.bun/bin/bun" ]; then
+        bun_cmd="$HOME/.bun/bin/bun"
+    else
+        echo -e "${RED}Error: Bun is required for --build-local. Install Bun and retry.${NC}"
+        exit 1
+    fi
+
+    build_local_version=${OPENCODE_VERSION:-"0.0.0-mon-$(date -u +%Y%m%d%H%M)"}
+
+    echo -e "${NC}Building local ${APP} binary version ${build_local_version}...${NC}"
+    PATH="$(dirname "$bun_cmd"):$PATH" OPENCODE_VERSION="$build_local_version" "$bun_cmd" run --cwd "$script_dir/packages/opencode" build --single --skip-install --skip-embed-web-ui
+
+    binary_path=$(ls -1t "$script_dir"/packages/opencode/dist/*/bin/opencode 2>/dev/null | head -n 1 || true)
+    if [ -z "$binary_path" ]; then
+        echo -e "${RED}Error: Build completed but no binary was found in packages/opencode/dist${NC}"
+        exit 1
+    fi
+fi
 
 # If --binary is provided, skip all download/detection logic
 if [ -n "$binary_path" ]; then
@@ -74,7 +119,11 @@ if [ -n "$binary_path" ]; then
         echo -e "${RED}Error: Binary not found at ${binary_path}${NC}"
         exit 1
     fi
-    specific_version="local"
+    if [ -n "$build_local_version" ]; then
+        specific_version="$build_local_version"
+    else
+        specific_version="local"
+    fi
 else
     raw_os=$(uname -s)
     os=$(echo "$raw_os" | tr '[:upper:]' '[:lower:]')
@@ -181,8 +230,8 @@ else
     fi
 
     if [ -z "$requested_version" ]; then
-        url="https://github.com/anomalyco/opencode/releases/latest/download/$filename"
-        specific_version=$(curl -s https://api.github.com/repos/anomalyco/opencode/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+        url="https://github.com/${GITHUB_REPO}/releases/latest/download/$filename"
+        specific_version=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
 
         if [[ $? -ne 0 || -z "$specific_version" ]]; then
             echo -e "${RED}Failed to fetch version information${NC}"
@@ -191,14 +240,14 @@ else
     else
         # Strip leading 'v' if present
         requested_version="${requested_version#v}"
-        url="https://github.com/anomalyco/opencode/releases/download/v${requested_version}/$filename"
+        url="https://github.com/${GITHUB_REPO}/releases/download/v${requested_version}/$filename"
         specific_version=$requested_version
 
         # Verify the release exists before downloading
-        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/anomalyco/opencode/releases/tag/v${requested_version}")
+        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/${GITHUB_REPO}/releases/tag/v${requested_version}")
         if [ "$http_status" = "404" ]; then
             echo -e "${RED}Error: Release v${requested_version} not found${NC}"
-            echo -e "${MUTED}Available releases: https://github.com/anomalyco/opencode/releases${NC}"
+            echo -e "${MUTED}Available releases: https://github.com/${GITHUB_REPO}/releases${NC}"
             exit 1
         fi
     fi
@@ -219,11 +268,9 @@ print_message() {
 }
 
 check_version() {
-    if command -v opencode >/dev/null 2>&1; then
-        opencode_path=$(which opencode)
-
+    if command -v "$COMMAND" >/dev/null 2>&1; then
         ## Check the installed version
-        installed_version=$(opencode --version 2>/dev/null || echo "")
+        installed_version=$($COMMAND --version 2>/dev/null || echo "")
 
         if [[ "$installed_version" != "$specific_version" ]]; then
             print_message info "${MUTED}Installed version: ${NC}$installed_version."
@@ -325,8 +372,8 @@ download_with_progress() {
 }
 
 download_and_install() {
-    print_message info "\n${MUTED}Installing ${NC}opencode ${MUTED}version: ${NC}$specific_version"
-    local tmp_dir="${TMPDIR:-/tmp}/opencode_install_$$"
+    print_message info "\n${MUTED}Installing ${NC}${COMMAND} ${MUTED}version: ${NC}$specific_version"
+    local tmp_dir="${TMPDIR:-/tmp}/${COMMAND}_install_$$"
     mkdir -p "$tmp_dir"
 
     if [[ "$os" == "windows" ]] || ! [ -t 2 ] || ! download_with_progress "$url" "$tmp_dir/$filename"; then
@@ -340,15 +387,19 @@ download_and_install() {
         unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
     fi
 
-    mv "$tmp_dir/opencode" "$INSTALL_DIR"
-    chmod 755 "${INSTALL_DIR}/opencode"
+    mv "$tmp_dir/${APP}" "${INSTALL_DIR}/${COMMAND}"
+    chmod 755 "${INSTALL_DIR}/${COMMAND}"
     rm -rf "$tmp_dir"
 }
 
 install_from_binary() {
-    print_message info "\n${MUTED}Installing ${NC}opencode ${MUTED}from: ${NC}$binary_path"
-    cp "$binary_path" "${INSTALL_DIR}/opencode"
-    chmod 755 "${INSTALL_DIR}/opencode"
+    if [ "$specific_version" = "local" ]; then
+        print_message info "\n${MUTED}Installing ${NC}${COMMAND} ${MUTED}from: ${NC}$binary_path"
+    else
+        print_message info "\n${MUTED}Installing ${NC}${COMMAND} ${MUTED}version: ${NC}$specific_version ${MUTED}from: ${NC}$binary_path"
+    fi
+    cp "$binary_path" "${INSTALL_DIR}/${COMMAND}"
+    chmod 755 "${INSTALL_DIR}/${COMMAND}"
 }
 
 if [ -n "$binary_path" ]; then
@@ -366,9 +417,9 @@ add_to_path() {
     if grep -Fxq "$command" "$config_file"; then
         print_message info "Command already exists in $config_file, skipping write."
     elif [[ -w $config_file ]]; then
-        echo -e "\n# opencode" >> "$config_file"
+        echo -e "\n# ${COMMAND}" >> "$config_file"
         echo "$command" >> "$config_file"
-        print_message info "${MUTED}Successfully added ${NC}opencode ${MUTED}to \$PATH in ${NC}$config_file"
+        print_message info "${MUTED}Successfully added ${NC}${COMMAND} ${MUTED}to \$PATH in ${NC}$config_file"
     else
         print_message warning "Manually add the directory to $config_file (or similar):"
         print_message info "  $command"
@@ -453,7 +504,7 @@ echo -e ""
 echo -e "${MUTED}OpenCode includes free models, to start:${NC}"
 echo -e ""
 echo -e "cd <project>  ${MUTED}# Open directory${NC}"
-echo -e "opencode      ${MUTED}# Run command${NC}"
+echo -e "${COMMAND}      ${MUTED}# Run command${NC}"
 echo -e ""
 echo -e "${MUTED}For more information visit ${NC}https://opencode.ai/docs"
 echo -e ""

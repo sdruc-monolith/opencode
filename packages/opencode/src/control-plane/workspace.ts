@@ -122,6 +122,10 @@ export const create = fn(CreateInput.zod, async (input) => {
     OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
     OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
     OTEL_RESOURCE_ATTRIBUTES: process.env.OTEL_RESOURCE_ATTRIBUTES,
+    WANDB_API_KEY: process.env.WANDB_API_KEY,
+    WANDB_BASE_URL: process.env.WANDB_BASE_URL,
+    WANDB_ENTITY: process.env.WANDB_ENTITY,
+    WANDB_PROJECT: process.env.WANDB_PROJECT,
   }
   await adaptor.create(config, env)
 

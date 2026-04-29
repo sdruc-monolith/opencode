@@ -119,6 +119,55 @@ describe("session.llm.hasToolCalls", () => {
   })
 })
 
+describe("session.llm.isWandbTurnSpanName", () => {
+  test("returns true for top-level streamText spans", () => {
+    expect(LLM.isWandbTurnSpanName("ai.streamText")).toBe(true)
+  })
+
+  test("returns false for nested and tool spans", () => {
+    expect(LLM.isWandbTurnSpanName("ai.streamText.doStream")).toBe(false)
+    expect(LLM.isWandbTurnSpanName("ai.toolCall")).toBe(false)
+  })
+})
+
+describe("session.llm.wandbToolCallMirrorAttribute", () => {
+  test("maps tool args/result/name into weave-friendly attributes", () => {
+    expect(LLM.wandbToolCallMirrorAttribute("ai.toolCall.args", '{"command":"ls"}')).toEqual({
+      key: "input.value",
+      value: '{"command":"ls"}',
+    })
+    expect(LLM.wandbToolCallMirrorAttribute("ai.toolCall.result", '{"ok":true}')).toEqual({
+      key: "output.value",
+      value: '{"ok":true}',
+    })
+    expect(LLM.wandbToolCallMirrorAttribute("ai.toolCall.name", "bash")).toEqual({
+      key: "tool.name",
+      value: "bash",
+    })
+  })
+
+  test("ignores unrelated or non-string attributes", () => {
+    expect(LLM.wandbToolCallMirrorAttribute("ai.response.text", "hello")).toBeUndefined()
+    expect(LLM.wandbToolCallMirrorAttribute("ai.toolCall.result", { ok: true })).toBeUndefined()
+  })
+})
+
+describe("session.llm.wandbToolCallMirrorAttributes", () => {
+  test("collects all supported mirrors", () => {
+    expect(
+      LLM.wandbToolCallMirrorAttributes({
+        "ai.toolCall.name": "read",
+        "ai.toolCall.args": '{"filePath":"/tmp/a.txt"}',
+        "ai.toolCall.result": '{"output":"ok"}',
+      }),
+    ).toEqual({
+      "tool.name": "read",
+      "input.value": '{"filePath":"/tmp/a.txt"}',
+      "output.value": '{"output":"ok"}',
+    })
+  })
+})
+
 type Capture = {
   url: URL
   headers: Headers

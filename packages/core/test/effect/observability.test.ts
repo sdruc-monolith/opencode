@@ -3,6 +3,8 @@ import { resource } from "@opencode-ai/core/effect/observability"
 
 const otelResourceAttributes = process.env.OTEL_RESOURCE_ATTRIBUTES
 const opencodeClient = process.env.OPENCODE_CLIENT
+const wandbEntity = process.env.WANDB_ENTITY
+const wandbProject = process.env.WANDB_PROJECT
 
 afterEach(() => {
   if (otelResourceAttributes === undefined) delete process.env.OTEL_RESOURCE_ATTRIBUTES
@@ -10,6 +12,12 @@ afterEach(() => {
 
   if (opencodeClient === undefined) delete process.env.OPENCODE_CLIENT
   else process.env.OPENCODE_CLIENT = opencodeClient
+
+  if (wandbEntity === undefined) delete process.env.WANDB_ENTITY
+  else process.env.WANDB_ENTITY = wandbEntity
+
+  if (wandbProject === undefined) delete process.env.WANDB_PROJECT
+  else process.env.WANDB_PROJECT = wandbProject
 })
 
 describe("resource", () => {
@@ -42,5 +50,15 @@ describe("resource", () => {
       "service.namespace": "anomalyco",
     })
     expect(resource().attributes["service.instance.id"]).not.toBe("override")
+  })
+
+  test("adds W&B routing attributes from env", () => {
+    process.env.WANDB_ENTITY = "opencode"
+    process.env.WANDB_PROJECT = "agents"
+
+    expect(resource().attributes).toMatchObject({
+      "wandb.entity": "opencode",
+      "wandb.project": "agents",
+    })
   })
 })

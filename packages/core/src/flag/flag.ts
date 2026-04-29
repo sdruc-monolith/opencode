@@ -104,4 +104,16 @@ export const Flag = {
   get OPENCODE_CLIENT() {
     return process.env["OPENCODE_CLIENT"] ?? "cli"
   },
+  get WANDB_API_KEY() {
+    return process.env["WANDB_API_KEY"]
+  },
+  get WANDB_BASE_URL() {
+    return process.env["WANDB_BASE_URL"]
+  },
+  get WANDB_ENTITY() {
+    return process.env["WANDB_ENTITY"]
+  },
+  get WANDB_PROJECT() {
+    return process.env["WANDB_PROJECT"]
+  },
 }

@@ -22,6 +22,7 @@ import { Auth } from "@/auth"
 import { Installation } from "@/installation"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { EffectBridge } from "@/effect/bridge"
+import type { AttributeValue } from "@opentelemetry/api"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
 
@@ -322,8 +323,13 @@ const live: Layer.Layer<
             get(target, prop, receiver) {
               if (prop !== "startSpan") return Reflect.get(target, prop, receiver)
               return (...args: Parameters<typeof target.startSpan>) => {
-                const span = target.startSpan(...args)
+                const spanName = args[0]
+                const span = wrapWandbToolCallSpan(spanName, target.startSpan(...args), args[1])
                 span.setAttribute("session.id", input.sessionID)
+                span.setAttribute("wandb.thread_id", input.sessionID)
+                if (isWandbTurnSpanName(spanName)) {
+                  span.setAttribute("wandb.is_turn", true)
+                }
                 return span
               }
             },
@@ -461,6 +467,77 @@ export function hasToolCalls(messages: ModelMessage[]): boolean {
     }
   }
   return false
+}
+
+export function isWandbTurnSpanName(name: string) {
+  return name === "ai.streamText"
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+export function wandbToolCallMirrorAttribute(key: string, value: unknown) {
+  if (typeof value !== "string") return
+  if (key === "ai.toolCall.args") return { key: "input.value", value }
+  if (key === "ai.toolCall.result") return { key: "output.value", value }
+  if (key === "ai.toolCall.name") return { key: "tool.name", value }
+}
+
+export function wandbToolCallMirrorAttributes(attributes: Record<string, unknown>) {
+  return Object.entries(attributes).reduce(
+    (acc, [key, value]) => {
+      const mirror = wandbToolCallMirrorAttribute(key, value)
+      if (!mirror) return acc
+      acc[mirror.key] = mirror.value
+      return acc
+    },
+    {} as Record<string, string>,
+  )
+}
+
+function wrapWandbToolCallSpan<
+  T extends {
+    setAttribute: (key: string, value: AttributeValue) => unknown
+    setAttributes: (attributes: Record<string, AttributeValue>) => unknown
+  } & object,
+>(
+  spanName: string,
+  span: T,
+  options: unknown,
+) {
+  if (spanName !== "ai.toolCall") return span
+  span.setAttribute("weave.span.kind", "tool")
+  const attributes = isRecord(options) && isRecord(options.attributes) ? options.attributes : undefined
+  if (attributes) {
+    Object.entries(wandbToolCallMirrorAttributes(attributes)).forEach(([key, value]) => {
+      span.setAttribute(key, value)
+    })
+  }
+  return new Proxy(span, {
+    get(target, prop, receiver) {
+      if (prop === "setAttribute") {
+        return (key: string, value: AttributeValue) => {
+          target.setAttribute(key, value)
+          const mirror = wandbToolCallMirrorAttribute(key, value)
+          if (mirror) target.setAttribute(mirror.key, mirror.value)
+          return receiver
+        }
+      }
+      if (prop === "setAttributes") {
+        return (attributes: Record<string, AttributeValue>) => {
+          target.setAttributes(attributes)
+          Object.entries(wandbToolCallMirrorAttributes(attributes)).forEach(([key, value]) => {
+            target.setAttribute(key, value)
+          })
+          return receiver
+        }
+      }
+      const value = Reflect.get(target, prop, receiver)
+      if (typeof value === "function") return value.bind(target)
+      return value
+    },
+  })
 }
 
 export * as LLM from "./llm"

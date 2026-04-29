@@ -163,6 +163,75 @@ test("loads shell config field", async () => {
   })
 })
 
+test("applies observability env from config experimental fields", async () => {
+  const previous = {
+    OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
+    OTEL_EXPORTER_OTLP_HEADERS: process.env.OTEL_EXPORTER_OTLP_HEADERS,
+    WANDB_API_KEY: process.env.WANDB_API_KEY,
+    WANDB_BASE_URL: process.env.WANDB_BASE_URL,
+    WANDB_ENTITY: process.env.WANDB_ENTITY,
+    WANDB_PROJECT: process.env.WANDB_PROJECT,
+  }
+
+  delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+  delete process.env.OTEL_EXPORTER_OTLP_HEADERS
+  delete process.env.WANDB_API_KEY
+  delete process.env.WANDB_BASE_URL
+  delete process.env.WANDB_ENTITY
+  delete process.env.WANDB_PROJECT
+
+  try {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await writeConfig(dir, {
+          $schema: "https://opencode.ai/config.json",
+          experimental: {
+            openTelemetry: true,
+            openTelemetryEndpoint: "https://trace.wandb.ai/otel/v1/traces",
+            openTelemetryHeaders: "x-test=1",
+            wandbApiKey: "test-key",
+            wandbBaseUrl: "https://trace.wandb.ai",
+            wandbEntity: "team",
+            wandbProject: "project",
+          },
+        })
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const config = await load()
+        expect(config.experimental?.openTelemetry).toBe(true)
+      },
+    })
+
+    expect(process.env["OTEL_EXPORTER_OTLP_ENDPOINT"]!).toBe("https://trace.wandb.ai/otel/v1/traces")
+    expect(process.env["OTEL_EXPORTER_OTLP_HEADERS"]!).toBe("x-test=1")
+    expect(process.env["WANDB_API_KEY"]).toBeUndefined()
+    expect(process.env["WANDB_BASE_URL"]!).toBe("https://trace.wandb.ai")
+    expect(process.env["WANDB_ENTITY"]!).toBe("team")
+    expect(process.env["WANDB_PROJECT"]!).toBe("project")
+  } finally {
+    if (previous.OTEL_EXPORTER_OTLP_ENDPOINT === undefined) delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+    else process.env.OTEL_EXPORTER_OTLP_ENDPOINT = previous.OTEL_EXPORTER_OTLP_ENDPOINT
+
+    if (previous.OTEL_EXPORTER_OTLP_HEADERS === undefined) delete process.env.OTEL_EXPORTER_OTLP_HEADERS
+    else process.env.OTEL_EXPORTER_OTLP_HEADERS = previous.OTEL_EXPORTER_OTLP_HEADERS
+
+    if (previous.WANDB_API_KEY === undefined) delete process.env.WANDB_API_KEY
+    else process.env.WANDB_API_KEY = previous.WANDB_API_KEY
+
+    if (previous.WANDB_BASE_URL === undefined) delete process.env.WANDB_BASE_URL
+    else process.env.WANDB_BASE_URL = previous.WANDB_BASE_URL
+
+    if (previous.WANDB_ENTITY === undefined) delete process.env.WANDB_ENTITY
+    else process.env.WANDB_ENTITY = previous.WANDB_ENTITY
+
+    if (previous.WANDB_PROJECT === undefined) delete process.env.WANDB_PROJECT
+    else process.env.WANDB_PROJECT = previous.WANDB_PROJECT
+  }
+})
+
 test("updates config and preserves empty shell sentinel", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

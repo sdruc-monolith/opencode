@@ -58,12 +58,23 @@ function mergeConfigConcatArrays(target: Info, source: Info): Info {
 function normalizeLoadedConfig(data: unknown, source: string) {
   if (!isRecord(data)) return data
   const copy = { ...data }
-  const hadLegacy = "theme" in copy || "keybinds" in copy || "tui" in copy
-  if (!hadLegacy) return copy
-  delete copy.theme
-  delete copy.keybinds
-  delete copy.tui
-  log.warn("tui keys in opencode config are deprecated; move them to tui.json", { path: source })
+  const hadLegacyTui = "theme" in copy || "keybinds" in copy || "tui" in copy
+  const hadLegacyWandbApiKey = isRecord(copy.experimental) && "wandbApiKey" in copy.experimental
+  if (!hadLegacyTui && !hadLegacyWandbApiKey) return copy
+  if (hadLegacyTui) {
+    delete copy.theme
+    delete copy.keybinds
+    delete copy.tui
+    log.warn("tui keys in opencode config are deprecated; move them to tui.json", { path: source })
+  }
+  if (hadLegacyWandbApiKey && isRecord(copy.experimental)) {
+    const experimental = { ...copy.experimental }
+    delete experimental.wandbApiKey
+    copy.experimental = experimental
+    log.warn("experimental.wandbApiKey in opencode config is deprecated; use WANDB_API_KEY env var", {
+      path: source,
+    })
+  }
   return copy
 }
 
@@ -242,6 +253,21 @@ export const Info = Schema.Struct({
       openTelemetry: Schema.optional(Schema.Boolean).annotate({
         description: "Enable OpenTelemetry spans for AI SDK calls (using the 'experimental_telemetry' flag)",
       }),
+      openTelemetryEndpoint: Schema.optional(Schema.String).annotate({
+        description: "Override OTLP exporter endpoint (equivalent to OTEL_EXPORTER_OTLP_ENDPOINT)",
+      }),
+      openTelemetryHeaders: Schema.optional(Schema.String).annotate({
+        description: "Override OTLP exporter headers (equivalent to OTEL_EXPORTER_OTLP_HEADERS)",
+      }),
+      wandbBaseUrl: Schema.optional(Schema.String).annotate({
+        description: "Weights & Biases trace base URL (defaults to https://trace.wandb.ai)",
+      }),
+      wandbEntity: Schema.optional(Schema.String).annotate({
+        description: "Weights & Biases team or user name for trace routing",
+      }),
+      wandbProject: Schema.optional(Schema.String).annotate({
+        description: "Weights & Biases project name for trace routing",
+      }),
       primary_tools: Schema.optional(Schema.mutable(Schema.Array(Schema.String))).annotate({
         description: "Tools that should only be available to primary agents.",
       }),
@@ -326,6 +352,26 @@ function writableGlobal(info: Info) {
   // When a user changes config from a value back to default in the Desktop app, we don't want to leave a blank `"shell": "",` key
   if ("shell" in next && next.shell === "") return { ...next, shell: undefined }
   return next
+}
+
+function applyObservabilityEnv(info: Info) {
+  const experimental = info.experimental
+  if (!experimental) return
+  if (experimental.openTelemetryEndpoint && !process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+    process.env.OTEL_EXPORTER_OTLP_ENDPOINT = experimental.openTelemetryEndpoint
+  }
+  if (experimental.openTelemetryHeaders && !process.env.OTEL_EXPORTER_OTLP_HEADERS) {
+    process.env.OTEL_EXPORTER_OTLP_HEADERS = experimental.openTelemetryHeaders
+  }
+  if (experimental.wandbBaseUrl && !process.env.WANDB_BASE_URL) {
+    process.env.WANDB_BASE_URL = experimental.wandbBaseUrl
+  }
+  if (experimental.wandbEntity && !process.env.WANDB_ENTITY) {
+    process.env.WANDB_ENTITY = experimental.wandbEntity
+  }
+  if (experimental.wandbProject && !process.env.WANDB_PROJECT) {
+    process.env.WANDB_PROJECT = experimental.wandbProject
+  }
 }
 
 export const ConfigDirectoryTypoError = NamedError.create(
@@ -687,6 +733,8 @@ export const layer = Layer.effect(
         if (Flag.OPENCODE_DISABLE_PRUNE) {
           result.compaction = { ...result.compaction, prune: false }
         }
+
+        applyObservabilityEnv(result)
 
         return {
           config: result,
