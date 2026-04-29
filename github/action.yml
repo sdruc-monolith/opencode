@@ -38,6 +38,10 @@ inputs:
     description: "Base URL for OIDC token exchange API. Only required when running a custom GitHub App install. Defaults to https://api.opencode.ai"
     required: false
 
+  install_url:
+    description: "Installer URL for the moncode CLI. Defaults to the latest MonolithAILtd/moncode release."
+    required: false
+
 runs:
   using: "composite"
   steps:
@@ -45,29 +49,38 @@ runs:
       id: version
       shell: bash
       run: |
-        VERSION=$(curl -sf https://api.github.com/repos/anomalyco/opencode/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-        echo "version=${VERSION:-latest}" >> $GITHUB_OUTPUT
+        if [ -n "${{ inputs.install_url }}" ]; then
+          VERSION=$(printf '%s' "${{ inputs.install_url }}" | shasum -a 256 | cut -d' ' -f1)
+        else
+          VERSION=$(curl -sf https://api.github.com/repos/MonolithAILtd/moncode/releases/latest | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+        fi
+        echo "version=${VERSION:-latest}" >> "$GITHUB_OUTPUT"
 
-    - name: Cache opencode
+    - name: Cache moncode
       id: cache
       uses: actions/cache@v4
       with:
-        path: ~/.opencode/bin
-        key: opencode-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
+        path: ~/.moncode/bin
+        key: moncode-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
 
-    - name: Install opencode
+    - name: Install moncode
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
-      run: curl -fsSL https://opencode.ai/install | bash
+      run: |
+        INSTALL_URL="${{ inputs.install_url }}"
+        if [ -z "$INSTALL_URL" ]; then
+          INSTALL_URL="https://github.com/MonolithAILtd/moncode/releases/latest/download/install"
+        fi
+        curl -fsSL "$INSTALL_URL" | bash
 
-    - name: Add opencode to PATH
+    - name: Add moncode to PATH
       shell: bash
-      run: echo "$HOME/.opencode/bin" >> $GITHUB_PATH
+      run: echo "$HOME/.moncode/bin" >> "$GITHUB_PATH"
 
-    - name: Run opencode
+    - name: Run moncode
       shell: bash
       id: run_opencode
-      run: opencode github run
+      run: moncode github run
       env:
         MODEL: ${{ inputs.model }}
         AGENT: ${{ inputs.agent }}

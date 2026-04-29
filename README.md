@@ -48,6 +48,9 @@
 This repo includes a local installer script at `./install`.
 
 ```bash
+# Install latest release
+curl -fsSL https://github.com/MonolithAILtd/moncode/releases/latest/download/install | bash
+
 # Show installer options
 ./install --help
 
@@ -56,6 +59,9 @@ This repo includes a local installer script at `./install`.
 
 # Install from an existing local binary
 ./install --binary /path/to/opencode
+
+# Install from a specific release archive URL
+./install --url https://github.com/MonolithAILtd/moncode/releases/download/v1.14.29/opencode-linux-x64.tar.gz
 ```
 
 #### Build From Source

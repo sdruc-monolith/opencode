@@ -22,6 +22,7 @@ const env = {
   OPENCODE_BUMP: process.env["OPENCODE_BUMP"],
   OPENCODE_VERSION: process.env["OPENCODE_VERSION"],
   OPENCODE_RELEASE: process.env["OPENCODE_RELEASE"],
+  GH_REPO: process.env["GH_REPO"],
 }
 const CHANNEL = await (async () => {
   if (env.OPENCODE_CHANNEL) return env.OPENCODE_CHANNEL
@@ -34,12 +35,27 @@ const IS_PREVIEW = CHANNEL !== "latest"
 const VERSION = await (async () => {
   if (env.OPENCODE_VERSION) return env.OPENCODE_VERSION
   if (IS_PREVIEW) return `0.0.0-${CHANNEL}-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "")}`
-  const version = await fetch("https://registry.npmjs.org/opencode-ai/latest")
-    .then((res) => {
-      if (!res.ok) throw new Error(res.statusText)
-      return res.json()
-    })
-    .then((data: any) => data.version)
+  const version = await (async () => {
+    if (env.GH_REPO && env.GH_REPO !== "anomalyco/opencode") {
+      const release = await fetch(`https://api.github.com/repos/${env.GH_REPO}/releases/latest`)
+        .then((res) => {
+          if (res.status === 404) return undefined
+          if (!res.ok) throw new Error(res.statusText)
+          return res.json() as Promise<{ tag_name?: string }>
+        })
+        .catch(() => undefined)
+      if (release?.tag_name) return release.tag_name.replace(/^v/, "")
+      return await Bun.file(path.resolve(import.meta.dir, "../../../packages/opencode/package.json"))
+        .json()
+        .then((data: { version: string }) => data.version)
+    }
+    return await fetch("https://registry.npmjs.org/opencode-ai/latest")
+      .then((res) => {
+        if (!res.ok) throw new Error(res.statusText)
+        return res.json() as Promise<{ version: string }>
+      })
+      .then((data) => data.version)
+  })()
   const [major, minor, patch] = version.split(".").map((x: string) => Number(x) || 0)
   const t = env.OPENCODE_BUMP?.toLowerCase()
   if (t === "major") return `${major + 1}.0.0`

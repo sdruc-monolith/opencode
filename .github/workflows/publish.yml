@@ -1,5 +1,5 @@
 name: publish
-run-name: "${{ format('release {0}', inputs.bump) }}"
+run-name: "release ${{ inputs.version || inputs.bump || (github.event_name == 'push' && github.ref_name == 'dev' && 'patch') || github.ref_name }}"
 
 on:
   push:
@@ -23,7 +23,7 @@ on:
         required: false
         type: string
 
-concurrency: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.version || inputs.bump }}
+concurrency: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.version || inputs.bump || (github.event_name == 'push' && github.ref_name == 'dev' && 'patch') || github.sha }}
 
 permissions:
   id-token: write
@@ -33,7 +33,6 @@ permissions:
 jobs:
   version:
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: github.repository == 'anomalyco/opencode'
     steps:
       - uses: actions/checkout@v3
         with:
@@ -43,21 +42,22 @@ jobs:
 
       - name: Setup git committer
         id: committer
+        if: github.repository == 'anomalyco/opencode'
         uses: ./.github/actions/setup-git-committer
         with:
           opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
           opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
 
       - name: Install OpenCode
-        if: inputs.bump || inputs.version
+        if: github.repository == 'anomalyco/opencode' && (inputs.bump || inputs.version || (github.event_name == 'push' && github.ref_name == 'dev'))
         run: bun i -g opencode-ai
 
       - id: version
         run: |
           ./script/version.ts
         env:
-          GH_TOKEN: ${{ steps.committer.outputs.token }}
-          OPENCODE_BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ steps.committer.outputs.token || github.token }}
+          OPENCODE_BUMP: ${{ inputs.bump || (github.event_name == 'push' && github.ref_name == 'dev' && 'patch') || '' }}
           OPENCODE_VERSION: ${{ inputs.version }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GH_REPO: ${{ (github.ref_name == 'beta' && 'anomalyco/opencode-beta') || github.repository }}
@@ -70,7 +70,6 @@ jobs:
   build-cli:
     needs: version
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: github.repository == 'anomalyco/opencode'
     steps:
       - uses: actions/checkout@v3
         with:
@@ -80,6 +79,7 @@ jobs:
 
       - name: Setup git committer
         id: committer
+        if: github.repository == 'anomalyco/opencode'
         uses: ./.github/actions/setup-git-committer
         with:
           opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
@@ -93,7 +93,16 @@ jobs:
           OPENCODE_VERSION: ${{ needs.version.outputs.version }}
           OPENCODE_RELEASE: ${{ needs.version.outputs.release }}
           GH_REPO: ${{ needs.version.outputs.repo }}
-          GH_TOKEN: ${{ steps.committer.outputs.token }}
+          GH_TOKEN: ${{ steps.committer.outputs.token || github.token }}
+
+      - name: Upload installer release asset
+        if: needs.version.outputs.release != ''
+        env:
+          GH_TOKEN: ${{ steps.committer.outputs.token || github.token }}
+        run: |
+          cp install "$RUNNER_TEMP/install"
+          perl -0pi -e 's|^GITHUB_REPO_DEFAULT=.*$|GITHUB_REPO_DEFAULT="${{ needs.version.outputs.repo }}"|m; s|^RELEASE_VERSION_DEFAULT=.*$|RELEASE_VERSION_DEFAULT="${{ needs.version.outputs.version }}"|m' "$RUNNER_TEMP/install"
+          gh release upload "v${{ needs.version.outputs.version }}" "$RUNNER_TEMP/install" --clobber --repo "${{ needs.version.outputs.repo }}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -213,6 +222,7 @@ jobs:
     needs:
       - build-cli
       - version
+    if: github.repository == 'anomalyco/opencode'
     continue-on-error: false
     env:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -551,7 +561,7 @@ jobs:
       - sign-cli-windows
       - build-tauri
       - build-electron
-    if: always() && !failure() && !cancelled()
+    if: always() && !failure() && !cancelled() && github.repository == 'anomalyco/opencode'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v3
@@ -632,3 +642,15 @@ jobs:
           GH_REPO: ${{ needs.version.outputs.repo }}
           NPM_CONFIG_PROVENANCE: false
           LATEST_YML_DIR: /tmp/latest-yml
+
+  publish-cli-release:
+    needs:
+      - version
+      - build-cli
+    if: always() && !failure() && !cancelled() && github.repository != 'anomalyco/opencode' && needs.version.outputs.release != ''
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v${{ needs.version.outputs.version }}" --draft=false --repo "${{ needs.version.outputs.repo }}"

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 APP=opencode
-COMMAND=moncode
-GITHUB_REPO=${GITHUB_REPO:-sdruc-monolith/opencode}
+COMMAND=${OPENCODE_COMMAND:-moncode}
+GITHUB_REPO_DEFAULT="MonolithAILtd/moncode"
+RELEASE_VERSION_DEFAULT=""
+GITHUB_REPO=${GITHUB_REPO:-${GITHUB_REPO_DEFAULT}}
 
 MUTED='\033[0;2m'
 RED='\033[0;31m'
@@ -18,6 +20,7 @@ Usage: install.sh [options]
 Options:
     -h, --help              Display this help message
     -v, --version <version> Install a specific version (e.g., 1.0.180)
+    -u, --url <url>         Install from a specific release asset URL
     -p, --binary <path>     Install from a local binary instead of downloading
     -b, --build-local       Build local binary from this repo and install it
         --no-modify-path    Don't modify shell config files (.zshrc, .bashrc, etc.)
@@ -25,16 +28,19 @@ Options:
 Examples:
     curl -fsSL https://opencode.ai/install | bash
     curl -fsSL https://opencode.ai/install | bash -s -- --version 1.0.180
+    curl -fsSL https://github.com/MonolithAILtd/moncode/releases/latest/download/install | bash
+    ./install --url https://github.com/MonolithAILtd/moncode/releases/download/v1.14.29/opencode-linux-x64.tar.gz
     ./install -p /path/to/opencode
     ./install -b
 EOF
 }
 
-requested_version=${VERSION:-}
+requested_version=${VERSION:-${RELEASE_VERSION:-${RELEASE_VERSION_DEFAULT}}}
 no_modify_path=false
 binary_path=""
 build_local=false
 build_local_version=""
+release_url=${RELEASE_URL:-}
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -48,6 +54,15 @@ while [[ $# -gt 0 ]]; do
                 shift 2
             else
                 echo -e "${RED}Error: --version requires a version argument${NC}"
+                exit 1
+            fi
+            ;;
+        -u|--url)
+            if [[ -n "${2:-}" ]]; then
+                release_url="$2"
+                shift 2
+            else
+                echo -e "${RED}Error: --url requires a URL argument${NC}"
                 exit 1
             fi
             ;;
@@ -80,6 +95,16 @@ mkdir -p "$INSTALL_DIR"
 
 if [ "$build_local" = "true" ] && [ -n "$binary_path" ]; then
     echo -e "${RED}Error: --build-local cannot be used together with --binary${NC}"
+    exit 1
+fi
+
+if [ "$build_local" = "true" ] && [ -n "$release_url" ]; then
+    echo -e "${RED}Error: --build-local cannot be used together with --url${NC}"
+    exit 1
+fi
+
+if [ -n "$binary_path" ] && [ -n "$release_url" ]; then
+    echo -e "${RED}Error: --binary cannot be used together with --url${NC}"
     exit 1
 fi
 
@@ -214,40 +239,63 @@ else
       target="$target-musl"
     fi
 
-    filename="$APP-$target$archive_ext"
-
-
-    if [ "$os" = "linux" ]; then
-        if ! command -v tar >/dev/null 2>&1; then
-             echo -e "${RED}Error: 'tar' is required but not installed.${NC}"
-             exit 1
+    if [ -n "$release_url" ]; then
+        url="$release_url"
+        filename="${release_url%%\?*}"
+        filename="${filename##*/}"
+        specific_version="release-url"
+        if [[ "$release_url" =~ /releases/download/v([^/]+)/ ]]; then
+            specific_version="${BASH_REMATCH[1]}"
         fi
     else
-        if ! command -v unzip >/dev/null 2>&1; then
-            echo -e "${RED}Error: 'unzip' is required but not installed.${NC}"
-            exit 1
+        filename="$APP-$target$archive_ext"
+
+        if [ -z "$requested_version" ]; then
+            url="https://github.com/${GITHUB_REPO}/releases/latest/download/$filename"
+            specific_version=$(curl -fsSL "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+
+            if [[ $? -ne 0 || -z "$specific_version" ]]; then
+                echo -e "${RED}Failed to fetch version information${NC}"
+                exit 1
+            fi
+        else
+            # Strip leading 'v' if present
+            requested_version="${requested_version#v}"
+            url="https://github.com/${GITHUB_REPO}/releases/download/v${requested_version}/$filename"
+            specific_version=$requested_version
+
+            # Verify the release exists before downloading
+            http_status=$(curl -fsSL -o /dev/null -w "%{http_code}" "https://github.com/${GITHUB_REPO}/releases/tag/v${requested_version}" || true)
+            if [ "$http_status" = "404" ]; then
+                echo -e "${RED}Error: Release v${requested_version} not found${NC}"
+                echo -e "${MUTED}Available releases: https://github.com/${GITHUB_REPO}/releases${NC}"
+                exit 1
+            fi
         fi
     fi
 
-    if [ -z "$requested_version" ]; then
-        url="https://github.com/${GITHUB_REPO}/releases/latest/download/$filename"
-        specific_version=$(curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
-
-        if [[ $? -ne 0 || -z "$specific_version" ]]; then
-            echo -e "${RED}Failed to fetch version information${NC}"
+    case "$filename" in
+        *.tar.gz)
+            if ! command -v tar >/dev/null 2>&1; then
+                 echo -e "${RED}Error: 'tar' is required but not installed.${NC}"
+                 exit 1
+            fi
+        ;;
+        *.zip)
+            if ! command -v unzip >/dev/null 2>&1; then
+                echo -e "${RED}Error: 'unzip' is required but not installed.${NC}"
+                exit 1
+            fi
+        ;;
+        *)
+            echo -e "${RED}Error: Unsupported archive type: ${filename}${NC}"
             exit 1
-        fi
-    else
-        # Strip leading 'v' if present
-        requested_version="${requested_version#v}"
-        url="https://github.com/${GITHUB_REPO}/releases/download/v${requested_version}/$filename"
-        specific_version=$requested_version
+        ;;
+    esac
 
-        # Verify the release exists before downloading
-        http_status=$(curl -sI -o /dev/null -w "%{http_code}" "https://github.com/${GITHUB_REPO}/releases/tag/v${requested_version}")
-        if [ "$http_status" = "404" ]; then
-            echo -e "${RED}Error: Release v${requested_version} not found${NC}"
-            echo -e "${MUTED}Available releases: https://github.com/${GITHUB_REPO}/releases${NC}"
+    if [ -n "$release_url" ]; then
+        if [[ "$release_url" != http://* && "$release_url" != https://* ]]; then
+            echo -e "${RED}Error: --url must be an http(s) URL${NC}"
             exit 1
         fi
     fi
@@ -334,7 +382,7 @@ download_with_progress() {
     trap "trap - RETURN; rm -f \"$tracefile\"; printf '\033[?25h' >&4; exec 4>&-" RETURN
 
     (
-        curl --trace-ascii "$tracefile" -s -L -o "$output" "$url"
+        curl --trace-ascii "$tracefile" -fsSL -o "$output" "$url"
     ) &
     local curl_pid=$!
 
@@ -378,10 +426,10 @@ download_and_install() {
 
     if [[ "$os" == "windows" ]] || ! [ -t 2 ] || ! download_with_progress "$url" "$tmp_dir/$filename"; then
         # Fallback to standard curl on Windows, non-TTY environments, or if custom progress fails
-        curl -# -L -o "$tmp_dir/$filename" "$url"
+        curl -f -# -L -o "$tmp_dir/$filename" "$url"
     fi
 
-    if [ "$os" = "linux" ]; then
+    if [[ "$filename" == *.tar.gz ]]; then
         tar -xzf "$tmp_dir/$filename" -C "$tmp_dir"
     else
         unzip -q "$tmp_dir/$filename" -d "$tmp_dir"
