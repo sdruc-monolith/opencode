@@ -45,20 +45,46 @@
 
 ### Installation
 
-```bash
-# YOLO
-curl -fsSL https://opencode.ai/install | bash
+This repo includes a local installer script at `./install`.
 
-# Package managers
-npm i -g opencode-ai@latest        # or bun/pnpm/yarn
-scoop install opencode             # Windows
-choco install opencode             # Windows
-brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
-brew install opencode              # macOS and Linux (official brew formula, updated less)
-sudo pacman -S opencode            # Arch Linux (Stable)
-paru -S opencode-bin               # Arch Linux (Latest from AUR)
-mise use -g opencode               # Any OS
-nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
+```bash
+# Show installer options
+./install --help
+
+# Build from this checkout and install locally
+./install --build-local
+
+# Install from an existing local binary
+./install --binary /path/to/opencode
+```
+
+#### Build From Source
+
+```bash
+git clone https://github.com/MonolithAILtd/moncode.git
+cd moncode
+bun install
+bun run --cwd packages/opencode script/build.ts --single --skip-embed-web-ui
+
+# Binary will be in packages/opencode/dist/opencode-<platform>-<arch>/bin/opencode
+./packages/opencode/dist/opencode-*/bin/opencode --version
+```
+
+#### Container (Docker)
+
+```bash
+# Build image from this repo
+docker build -f docker/Dockerfile -t moncode .
+
+# Quick smoke test
+docker run --rm -it moncode --version
+
+# Run against your current project with persisted config
+docker run --rm -it \
+  -v "$PWD:/workspace" \
+  -v "$HOME/.config/opencode:/home/opencode/.config/opencode" \
+  -w /workspace \
+  moncode
 ```
 
 > [!TIP]
@@ -80,21 +106,6 @@ OpenCode is also available as a desktop application. Download directly from the 
 brew install --cask opencode-desktop
 # Windows (Scoop)
 scoop bucket add extras; scoop install extras/opencode-desktop
-```
-
-#### Installation Directory
-
-The install script respects the following priority order for the installation path:
-
-1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
-2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
-3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
-4. `$HOME/.opencode/bin` - Default fallback
-
-```bash
-# Examples
-OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
-XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
 ```
 
 ### Agents
